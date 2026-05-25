@@ -30,6 +30,12 @@ should continue to invoke:
 scripts/harness <command>
 ```
 
+On native Windows, target projects should invoke the companion launcher:
+
+```powershell
+scripts\harness.cmd <command>
+```
+
 The installed `scripts/harness` path may become a small launcher that locates,
 downloads, verifies, and executes the platform-specific Rust binary, or it may
 be the downloaded binary itself. The exact launcher shape should be decided
@@ -65,6 +71,8 @@ Positive:
 - Target projects do not need a Rust toolchain just to use Harness.
 - The `scripts/harness` command remains the stable entrypoint for agents.
 - Prebuilt releases can include a known SQLite linkage strategy.
+- Native Windows users can run Harness from PowerShell or cmd.exe without a
+  Bash compatibility layer.
 
 Tradeoffs:
 
@@ -72,6 +80,8 @@ Tradeoffs:
 - Release artifacts need checksums or another integrity check.
 - Unsupported platforms need a clear error path.
 - The project needs a repeatable release process for supported platforms.
+- The installer and release pipeline must keep POSIX and Windows binary names in
+  sync.
 
 ## Follow-Up
 

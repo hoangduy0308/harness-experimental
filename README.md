@@ -45,15 +45,15 @@ engineering questions without relying only on chat history:
 
 In this repo, those answers live in:
 
-- `AGENTS.md` — the stable agent shim with local project notes and Harness
+- `AGENTS.md` â€” the stable agent shim with local project notes and Harness
   doc links.
-- `docs/HARNESS.md` — the human-agent collaboration model.
-- `docs/FEATURE_INTAKE.md` — tiny, normal, and high-risk work classification.
-- `docs/ARCHITECTURE.md` — architecture discovery and boundary rules.
-- `docs/TEST_MATRIX.md` — behavior-to-proof validation expectations.
-- `docs/stories/` — story packets and backlog items.
-- `docs/decisions/` — durable decisions and tradeoffs.
-- `docs/templates/` — reusable spec, story, decision, and validation templates.
+- `docs/HARNESS.md` â€” the human-agent collaboration model.
+- `docs/FEATURE_INTAKE.md` â€” tiny, normal, and high-risk work classification.
+- `docs/ARCHITECTURE.md` â€” architecture discovery and boundary rules.
+- `docs/TEST_MATRIX.md` â€” behavior-to-proof validation expectations.
+- `docs/stories/` â€” story packets and backlog items.
+- `docs/decisions/` â€” durable decisions and tradeoffs.
+- `docs/templates/` â€” reusable spec, story, decision, and validation templates.
 
 OpenAI describes this shift as an agent-first world where humans steer and
 agents execute:
@@ -62,20 +62,39 @@ https://openai.com/index/harness-engineering/
 
 ## Install Harness Into A Project
 
-From a target project directory, run:
+From a target project directory on macOS or Linux, run:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+```
+
+From a target project directory on native Windows PowerShell, run:
+
+```powershell
+$installer = "$env:TEMP\install-harness.ps1"
+Invoke-WebRequest "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.ps1?$(Get-Date -Format FileDateTime)" -OutFile $installer
+powershell -ExecutionPolicy Bypass -File $installer -Yes
+scripts\harness.cmd init
+scripts\harness.cmd query matrix
 ```
 
 If the target already has `AGENTS.md`, `docs/`, or `scripts/`, choose one:
 
 ```bash
 # Update an existing Harness repo without moving existing files
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
 
 # Back up and replace AGENTS.md, docs/, and scripts/
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --override --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --override --yes
+```
+
+On Windows, use `-Merge` for an existing project:
+
+```powershell
+$installer = "$env:TEMP\install-harness.ps1"
+Invoke-WebRequest "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.ps1?$(Get-Date -Format FileDateTime)" -OutFile $installer
+powershell -ExecutionPolicy Bypass -File $installer -Yes -Merge
+scripts\harness.cmd init
 ```
 
 Use `--merge` when a project already has Harness and you want to append newly
@@ -87,7 +106,7 @@ For older Harness installs whose `AGENTS.md` still contains the full generated
 operating guide, refresh it into the small stable shim:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
 ```
 
 The refresh backs up the existing file. If it detects the old
@@ -95,25 +114,46 @@ Harness-generated guide, it replaces it with the shim. If the file appears
 custom, it appends or updates a marked Harness block instead of overwriting the
 project's local instructions.
 
+On native Windows, use the PowerShell/cmd launcher after installation:
+
+```powershell
+scripts\harness.cmd init
+scripts\harness.cmd query matrix
+```
+
+The installer downloads the `harness-cli-windows-x64` release asset, installs it
+as `scripts/bin/harness-cli.exe`, and copies `scripts/harness.cmd` alongside
+the POSIX `scripts/harness` launcher.
+
 Or install into a specific path:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --directory /path/to/project --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --directory /path/to/project --yes
+```
+
+Windows install into a specific path:
+
+```powershell
+$installer = "$env:TEMP\install-harness.ps1"
+Invoke-WebRequest "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.ps1?$(Get-Date -Format FileDateTime)" -OutFile $installer
+powershell -ExecutionPolicy Bypass -File $installer -Directory F:\Work\target-project -Yes
 ```
 
 Use `--dry-run` to preview changes before writing files.
 
 The installer also downloads the prebuilt Harness CLI for the current platform,
 verifies its `.sha256` checksum, and installs it at
-`scripts/bin/harness-cli`. The Rust CLI is the main Harness tool. Installed
-projects keep `scripts/harness` as the stable command path, and that entrypoint
-uses the Rust binary for normal Harness work.
+`scripts/bin/harness-cli` on POSIX platforms or `scripts/bin/harness-cli.exe` on
+Windows. The Rust CLI is the main Harness tool. Installed projects keep
+`scripts/harness` as the stable POSIX command path and `scripts/harness.cmd` as
+the native Windows command path; both entrypoints use the Rust binary for normal
+Harness work.
 
 Harness CLI release assets are published from tags by the
 `Harness CLI Release` GitHub Actions workflow. The installer expects each
 release to include `harness-cli-<platform>` and
 `harness-cli-<platform>.sha256` assets for macOS arm64, macOS x64, Linux x64,
-and Linux arm64.
+Linux arm64, and Windows x64.
 
 ## Try The Flow
 

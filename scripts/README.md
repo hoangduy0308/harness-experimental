@@ -5,8 +5,10 @@ This directory contains harness automation tools.
 ## Harness CLI
 
 The Rust Harness CLI is the primary interface for the durable layer. Installed
-projects keep `scripts/harness` as the stable entrypoint; it uses the prebuilt
-Rust binary at `scripts/bin/harness-cli` for normal Harness work.
+projects keep `scripts/harness` as the stable POSIX entrypoint and
+`scripts/harness.cmd` as the native Windows entrypoint. These launchers use the
+prebuilt Rust binary at `scripts/bin/harness-cli` or
+`scripts/bin/harness-cli.exe` for normal Harness work.
 
 ```bash
 scripts/harness init          # Create the database
@@ -19,21 +21,30 @@ scripts/harness query ...     # Query harness data
 scripts/harness migrate       # Apply pending schema migrations
 ```
 
+On Windows PowerShell or cmd.exe, use:
+
+```powershell
+scripts\harness.cmd init
+scripts\harness.cmd query matrix
+```
+
 Run `scripts/harness help` or `scripts/harness query help` for full usage.
 
 The schema lives in `scripts/schema/` and is version-controlled. The database
 file (`harness.db`) is `.gitignore`d.
 
-Requires: the prebuilt Rust CLI at `scripts/bin/harness-cli`.
+Requires: the prebuilt Rust CLI at `scripts/bin/harness-cli` on POSIX platforms
+or `scripts/bin/harness-cli.exe` on Windows.
 
 Direct database inspection may still use SQLite tools, but normal Harness use
 should go through the Rust CLI.
 
 ### Rust CLI
 
-`scripts/harness` uses the Rust CLI when a prebuilt binary exists at
-`scripts/bin/harness-cli`, a development binary exists at
-`target/debug/harness-cli`, or a path is provided by `HARNESS_RUST_CLI`.
+`scripts/harness` and `scripts/harness.cmd` use the Rust CLI when a prebuilt
+binary exists at `scripts/bin/harness-cli` or `scripts/bin/harness-cli.exe`, a
+development binary exists at `target/debug/harness-cli` or
+`target\debug\harness-cli.exe`, or a path is provided by `HARNESS_RUST_CLI`.
 
 Current migrated commands:
 
@@ -84,15 +95,23 @@ shim. Use `--override` only when replacing the protected Harness surface is
 intentional.
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+```
+
+Native Windows PowerShell install:
+
+```powershell
+$installer = "$env:TEMP\install-harness.ps1"
+Invoke-WebRequest "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.ps1?$(Get-Date -Format FileDateTime)" -OutFile $installer
+powershell -ExecutionPolicy Bypass -File $installer -Yes
 ```
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
 ```
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
+curl -fsSL "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
 ```
 
 `--refresh-agent-shim` backs up `AGENTS.md` before changing it. If the existing
@@ -103,14 +122,15 @@ in place.
 
 The installer must stay limited to harness files. Do not use it to scaffold
 application source folders, package scripts, CI, tests, platform shells, or fake
-validation commands. The installer script is not part of the installed project
-payload.
+validation commands. The POSIX and PowerShell installer scripts are part of the
+installed payload so existing projects can refresh Harness in place.
 
 By default the installer also downloads the prebuilt Rust Harness CLI for the
-current platform into `scripts/bin/harness-cli` and verifies its `.sha256`
-checksum before making it executable. Set `HARNESS_CLI_BASE_URL` to point at an
-alternate release artifact directory, such as a local `file:///.../dist`
-directory created by `scripts/build-harness-cli-release.sh`.
+current platform into `scripts/bin/harness-cli` or
+`scripts/bin/harness-cli.exe` and verifies its `.sha256` checksum before making
+it executable. Set `HARNESS_CLI_BASE_URL` to point at an alternate release
+artifact directory, such as a local `file:///.../dist` directory created by
+`scripts/build-harness-cli-release.sh`.
 
 ## Schema Migrations
 
@@ -154,6 +174,7 @@ The script writes `dist/harness-cli-<platform>` and
 - `macos-x64`
 - `linux-x64`
 - `linux-arm64`
+- `windows-x64`
 
 For cross-compilation, pass a Cargo target triple:
 
@@ -174,3 +195,5 @@ native hosted runners, and upload these release assets:
 - `harness-cli-linux-x64.sha256`
 - `harness-cli-linux-arm64`
 - `harness-cli-linux-arm64.sha256`
+- `harness-cli-windows-x64`
+- `harness-cli-windows-x64.sha256`

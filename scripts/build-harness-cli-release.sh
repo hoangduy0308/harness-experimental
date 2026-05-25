@@ -24,6 +24,7 @@ Supported platform labels:
   x86_64-apple-darwin       -> macos-x64
   x86_64-unknown-linux-gnu  -> linux-x64
   aarch64-unknown-linux-gnu -> linux-arm64
+  x86_64-pc-windows-msvc   -> windows-x64
 EOF
 }
 
@@ -64,14 +65,17 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+binary_name="harness-cli"
 if [ -n "$target" ]; then
+  command -v cargo >/dev/null 2>&1 || fail "cargo is required to build Harness CLI releases"
   cargo_args=(build --package harness-cli --profile "$profile" --target "$target")
-  binary="$repo_root/target/$target/$profile/harness-cli"
   triple="$target"
 else
+  command -v cargo >/dev/null 2>&1 || fail "cargo is required to build Harness CLI releases"
+  command -v rustc >/dev/null 2>&1 || fail "rustc is required to detect the host target"
   cargo_args=(build --package harness-cli --profile "$profile")
-  binary="$repo_root/target/$profile/harness-cli"
   triple="$(rustc -vV | awk '/^host:/ { print $2 }')"
+  [ -n "$triple" ] || fail "Could not detect Rust host target. Is rustc installed and on PATH?"
 fi
 
 case "$triple" in
@@ -79,8 +83,15 @@ case "$triple" in
   x86_64-apple-darwin) platform="macos-x64" ;;
   x86_64-unknown-linux-gnu) platform="linux-x64" ;;
   aarch64-unknown-linux-gnu) platform="linux-arm64" ;;
+  x86_64-pc-windows-msvc) platform="windows-x64"; binary_name="harness-cli.exe" ;;
   *) fail "Unsupported release target: $triple" ;;
 esac
+
+if [ -n "$target" ]; then
+  binary="$repo_root/target/$target/$profile/$binary_name"
+else
+  binary="$repo_root/target/$profile/$binary_name"
+fi
 
 (
   cd "$repo_root"
