@@ -136,7 +136,7 @@ Windows install into a specific path:
 ```powershell
 $installer = "$env:TEMP\install-harness.ps1"
 Invoke-WebRequest "https://raw.githubusercontent.com/hoangduy0308/harness-experimental/main/scripts/install-harness.ps1?$(Get-Date -Format FileDateTime)" -OutFile $installer
-powershell -ExecutionPolicy Bypass -File $installer -Directory F:\Work\target-project -Yes
+powershell -ExecutionPolicy Bypass -File $installer -Directory C:\path\to\project -Yes
 ```
 
 Use `--dry-run` to preview changes before writing files.
