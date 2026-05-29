@@ -12,7 +12,8 @@ use crate::application::{
 };
 use crate::domain::{
     parse_optional_integer, BacklogRecord, BoolFlag, CsvList, DecisionRecord, FrictionRecord,
-    HarnessStats, InputType, IntakeRecord, RiskLane, StoryMatrixRecord, TraceRecord,
+    HarnessStats, InputType, IntakeRecord, RiskLane, StoryListRecord, StoryMatrixRecord,
+    TraceOutcome, TraceRecord,
 };
 
 #[derive(Parser, Debug)]
@@ -85,6 +86,7 @@ struct StoryArgs {
 enum StoryAction {
     Add(StoryAddArgs),
     Update(StoryUpdateArgs),
+    List,
 }
 
 #[derive(Args, Debug)]
@@ -308,6 +310,7 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 })?;
                 println!("Story {} updated.", args.id);
             }
+            StoryAction::List => print_story_list(&service.query_story_list()?),
         },
         Command::Decision(args) => match args.action {
             DecisionAction::Add(args) => {
@@ -362,7 +365,10 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 intake_id: parse_optional_integer("trace: --intake", args.intake)?,
                 story_id: args.story,
                 agent: args.agent,
-                outcome: args.outcome,
+                outcome: args
+                    .outcome
+                    .map(|value| TraceOutcome::from_str(&value))
+                    .transpose()?,
                 duration_seconds: parse_optional_integer("trace: --duration", args.duration)?,
                 token_estimate: parse_optional_integer("trace: --tokens", args.tokens)?,
                 friction: args.friction,
@@ -416,7 +422,7 @@ fn print_init_result(result: InitResult) {
     match result {
         InitResult::Created { db_path } => {
             println!("Creating harness database at {}", db_path.display());
-            println!("Schema version 1 applied.");
+            println!("Schema initialized.");
         }
         InitResult::Existing { db_path, version } => {
             println!("Database already exists at {}", db_path.display());
@@ -424,8 +430,8 @@ fn print_init_result(result: InitResult) {
         }
         InitResult::MigratedExisting { db_path } => {
             println!("Database already exists at {}", db_path.display());
-            println!("No schema version found. Applying schema version 1.");
-            println!("Schema version 1 applied.");
+            println!("Applied pending schema migrations.");
+            println!("Schema initialized.");
         }
     }
 }
@@ -482,6 +488,21 @@ fn print_matrix(records: &[StoryMatrixRecord]) {
         ],
         &rows,
     );
+}
+
+fn print_story_list(records: &[StoryListRecord]) {
+    let rows = records
+        .iter()
+        .map(|record| {
+            vec![
+                record.id.clone(),
+                record.title.clone(),
+                record.status.clone(),
+                record.lane.clone(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    print_table(&["id", "title", "status", "lane"], &rows);
 }
 
 fn print_backlog(records: &[BacklogRecord]) {

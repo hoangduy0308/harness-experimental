@@ -46,8 +46,21 @@ function Copy-HarnessFile($Relative) {
 
   if (Test-Path -LiteralPath $target) {
     if ($ConflictAction -eq 'merge') {
-      Log "skip     $Relative (merge keeps existing file)"
-      $script:Skipped++
+      if ($Relative -in @('scripts/harness', 'scripts/harness.cmd')) {
+        if ($DryRun) {
+          Log "update   $Relative (refresh launcher)"
+        } else {
+          $backup = Join-Path $BackupDir $Relative
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+          Copy-Item -LiteralPath $target -Destination $backup -Force
+          Write-SourceFile $Relative $target
+          Log "updated $Relative (backup: $($backup.Substring($TargetDir.Length + 1)))"
+        }
+        $script:Updated++
+      } else {
+        Log "skip     $Relative (merge keeps existing file)"
+        $script:Skipped++
+      }
       return
     }
 
@@ -112,6 +125,39 @@ function Merge-Gitignore($Target) {
   $script:Updated++
 }
 
+function Test-HarnessCliSupportsCurrentSchema($BinaryPath) {
+  $probeDb = Join-Path ([System.IO.Path]::GetTempPath()) ("harness-cli-probe-" + [guid]::NewGuid().ToString('N') + ".db")
+  $oldHarnessDb = $env:HARNESS_DB
+  $oldHarnessRoot = $env:HARNESS_REPO_ROOT
+  try {
+    $env:HARNESS_DB = $probeDb
+    $env:HARNESS_REPO_ROOT = $TargetDir
+    $storyHelp = & $BinaryPath story --help 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not (($storyHelp -join "`n") -match '(^|\s)list(\s|$)')) {
+      return $false
+    }
+
+    & $BinaryPath init *> $null
+    if ($LASTEXITCODE -ne 0) { return $false }
+
+    $traceOutput = & $BinaryPath trace --summary "__harness_probe__" --outcome review 2>&1
+    if ($LASTEXITCODE -ne 0) { return $false }
+    return (($traceOutput -join "`n") -match 'Trace #')
+  } finally {
+    if ($null -eq $oldHarnessDb) {
+      Remove-Item Env:HARNESS_DB -ErrorAction SilentlyContinue
+    } else {
+      $env:HARNESS_DB = $oldHarnessDb
+    }
+    if ($null -eq $oldHarnessRoot) {
+      Remove-Item Env:HARNESS_REPO_ROOT -ErrorAction SilentlyContinue
+    } else {
+      $env:HARNESS_REPO_ROOT = $oldHarnessRoot
+    }
+    Remove-Item -LiteralPath $probeDb, "$probeDb-wal", "$probeDb-shm" -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Install-HarnessCliBinary {
   $platform = $env:HARNESS_CLI_PLATFORM
   if (-not $platform) { $platform = 'windows-x64' }
@@ -122,8 +168,8 @@ function Install-HarnessCliBinary {
   $binaryName = "harness-cli-$platform"
   $target = Join-Path $TargetDir 'scripts\bin\harness-cli.exe'
 
-  if ((Test-Path -LiteralPath $target) -and $ConflictAction -eq 'merge' -and -not $Force) {
-    Log 'skip     scripts/bin/harness-cli.exe (merge keeps existing file)'
+  if ((Test-Path -LiteralPath $target) -and $ConflictAction -eq 'merge' -and -not $Force -and (Test-HarnessCliSupportsCurrentSchema $target)) {
+    Log 'skip     scripts/bin/harness-cli.exe (existing CLI supports current schema)'
     $script:Skipped++
     return
   }
@@ -149,10 +195,13 @@ function Install-HarnessCliBinary {
     if ($actual -ne $expected) {
       Fail "Checksum mismatch for ${binaryName}: expected $expected, got $actual"
     }
+    if (-not (Test-HarnessCliSupportsCurrentSchema $binaryTmp)) {
+      Fail "Downloaded Harness CLI does not support the current schema. Publish a compatible release or set HARNESS_CLI_BASE_URL to one before installing."
+    }
 
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
     if (Test-Path -LiteralPath $target) {
-      if ($Force) {
+      if ($Force -or $ConflictAction -eq 'merge') {
         $backup = Join-Path $BackupDir 'scripts\bin\harness-cli.exe'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
         Copy-Item -LiteralPath $target -Destination $backup -Force
@@ -262,6 +311,7 @@ Log "Target project: $TargetDir"
   'scripts/harness.cmd',
   'scripts/install-harness.ps1',
   'scripts/schema/001-init.sql',
+  'scripts/schema/002-trace-review-outcome.sql',
   '.gitignore'
 ) | ForEach-Object { Copy-HarnessFile $_ }
 

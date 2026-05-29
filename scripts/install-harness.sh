@@ -111,8 +111,24 @@ copy_file() {
     fi
 
     if [ "$CONFLICT_ACTION" = "merge" ]; then
-      log "skip     $relative (merge keeps existing file)"
-      SKIPPED=$((SKIPPED + 1))
+      case "$relative" in
+        scripts/harness|scripts/harness.cmd)
+          if [ "$DRY_RUN" -eq 1 ]; then
+            log "update   $relative (refresh launcher)"
+          else
+            local backup="$BACKUP_DIR/$relative"
+            mkdir -p "$(dirname "$backup")"
+            cp -p "$target" "$backup"
+            write_source_file "$relative" "$target"
+            log "updated $relative (backup: ${backup#$TARGET_DIR/})"
+          fi
+          UPDATED=$((UPDATED + 1))
+          ;;
+        *)
+          log "skip     $relative (merge keeps existing file)"
+          SKIPPED=$((SKIPPED + 1))
+          ;;
+      esac
     elif [ "$FORCE" -eq 1 ]; then
       if [ "$DRY_RUN" -eq 1 ]; then
         log "overwrite $relative (backup first)"
@@ -373,6 +389,29 @@ download_file() {
   curl -fsSL "$url" -o "$target" || fail "Could not download $url"
 }
 
+harness_cli_supports_current_schema() {
+  local binary="$1"
+
+  local probe_db output
+  probe_db="${TMPDIR:-/tmp}/harness-cli-probe-$$-$RANDOM.db"
+  rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+
+  if ! output="$("$binary" story --help 2>&1)" ||
+     ! printf '%s' "$output" | grep -Eq '(^|[[:space:]])list([[:space:]]|$)'; then
+    rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+    return 1
+  fi
+
+  if ! HARNESS_DB="$probe_db" HARNESS_REPO_ROOT="$TARGET_DIR" "$binary" init >/dev/null 2>&1; then
+    rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+    return 1
+  fi
+
+  output="$(HARNESS_DB="$probe_db" HARNESS_REPO_ROOT="$TARGET_DIR" "$binary" trace --summary "__harness_probe__" --outcome review 2>&1 || true)"
+  rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+  printf '%s' "$output" | grep -Fq "Trace #"
+}
+
 install_harness_cli_binary() {
   [ "$INSTALL_RUST_CLI" -eq 1 ] || return 0
 
@@ -387,8 +426,9 @@ install_harness_cli_binary() {
   esac
   target="$TARGET_DIR/scripts/bin/$installed_name"
 
-  if [ -e "$target" ] && [ "$CONFLICT_ACTION" = "merge" ] && [ "$FORCE" -eq 0 ]; then
-    log "skip     scripts/bin/harness-cli (merge keeps existing file)"
+  if [ -e "$target" ] && [ "$CONFLICT_ACTION" = "merge" ] && [ "$FORCE" -eq 0 ] &&
+     harness_cli_supports_current_schema "$target"; then
+    log "skip     scripts/bin/harness-cli (existing CLI supports current schema)"
     SKIPPED=$((SKIPPED + 1))
     return 0
   fi
@@ -408,6 +448,7 @@ install_harness_cli_binary() {
 
   download_file "$binary_url" "$binary_tmp"
   download_file "$checksum_url" "$checksum_tmp"
+  chmod 755 "$binary_tmp"
 
   expected="$(awk '{ print $1; exit }' "$checksum_tmp")"
   [ -n "$expected" ] || fail "Checksum file is empty: $checksum_url"
@@ -416,10 +457,14 @@ install_harness_cli_binary() {
     rm -rf "$tmp_dir"
     fail "Checksum mismatch for $binary_name: expected $expected, got $actual"
   fi
+  if ! harness_cli_supports_current_schema "$binary_tmp"; then
+    rm -rf "$tmp_dir"
+    fail "Downloaded Harness CLI does not support the current schema. Publish a compatible release or set HARNESS_CLI_BASE_URL to one before installing."
+  fi
 
   mkdir -p "$(dirname "$target")"
   if [ -e "$target" ]; then
-    if [ "$FORCE" -eq 1 ]; then
+    if [ "$FORCE" -eq 1 ] || [ "$CONFLICT_ACTION" = "merge" ]; then
       mkdir -p "$BACKUP_DIR/scripts/bin"
       cp -p "$target" "$BACKUP_DIR/scripts/bin/$installed_name"
     fi
@@ -701,6 +746,7 @@ scripts/harness
 scripts/harness.cmd
 scripts/install-harness.ps1
 scripts/schema/001-init.sql
+scripts/schema/002-trace-review-outcome.sql
 .gitignore
 EOF
 

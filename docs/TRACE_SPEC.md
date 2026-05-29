@@ -4,8 +4,8 @@ The `trace` table records what happened during a Harness task. This document
 defines the expected depth and format for each field so traces are useful for
 review, benchmark scoring, failure attribution, and future harness evolution.
 
-The current schema lives in `scripts/schema/001-init.sql` under the `trace`
-table. The schema is not changed by Phase 2.
+The current schema starts in `scripts/schema/001-init.sql` and is migrated by
+later files under `scripts/schema/`, including the `trace` table.
 
 ## Field Reference
 
@@ -22,7 +22,7 @@ table. The schema is not changed by Phase 2.
 | `files_changed` | TEXT | Standard+ | JSON array text of changed file paths. With the current CLI, pass a comma-separated list; omit only when no files changed. | `["docs/TRACE_SPEC.md","docs/HARNESS.md"]` |
 | `decisions_made` | TEXT | Detailed | JSON array text of decision strings. Include scope decisions, validation choices, and explicit non-goals. | `["Kept Phase 2 docs-only; installer propagation remains out of scope"]` |
 | `errors` | TEXT | Standard+ if errors occurred; Detailed always | JSON array text of error or blocker strings. Until the CLI supports empty arrays directly, use `none` when a detailed trace needs explicit no-error evidence. | `["git diff --check failed before whitespace fix"]` |
-| `outcome` | TEXT | Yes before final response | One of `completed`, `blocked`, `partial`, or `failed`. | `completed` |
+| `outcome` | TEXT | Yes before final response | One of `completed`, `blocked`, `partial`, `failed`, or `review`. Use `review` for code-review tasks that inspect work without changing product behavior. | `completed` |
 | `duration_seconds` | INTEGER | Detailed when available | Positive integer estimate or measured duration. Leave null if unknown. | `1800` |
 | `token_estimate` | INTEGER | Detailed when available | Positive integer estimate. Leave null if unknown. | `24000` |
 | `harness_friction` | TEXT | Standard+ when friction exists; Detailed always | Free text naming what was hard, missing, ambiguous, or repeated. Use `none` only when the agent actively checked and found no friction. | `New Phase 2 docs are not in installer copy list; recorded as out-of-scope follow-up.` |

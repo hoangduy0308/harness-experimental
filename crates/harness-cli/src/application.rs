@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::domain::{
     BacklogRecord, BoolFlag, CsvList, DecisionRecord, FrictionRecord, HarnessStats, InputType,
-    IntakeRecord, RiskLane, StoryMatrixRecord, TraceRecord,
+    IntakeRecord, RiskLane, StoryListRecord, StoryMatrixRecord, TraceOutcome, TraceRecord,
 };
 use crate::infrastructure::{HarnessRepository, SqliteHarnessRepository};
 
@@ -79,7 +79,7 @@ pub struct TraceInput {
     pub intake_id: Option<i64>,
     pub story_id: Option<String>,
     pub agent: Option<String>,
-    pub outcome: Option<String>,
+    pub outcome: Option<TraceOutcome>,
     pub duration_seconds: Option<i64>,
     pub token_estimate: Option<i64>,
     pub friction: Option<String>,
@@ -128,6 +128,10 @@ impl HarnessService {
 
     pub fn update_story(&self, input: StoryUpdateInput) -> crate::infrastructure::Result<()> {
         self.repository.update_story(input)
+    }
+
+    pub fn query_story_list(&self) -> crate::infrastructure::Result<Vec<StoryListRecord>> {
+        self.repository.query_story_list()
     }
 
     pub fn add_decision(&self, input: DecisionAddInput) -> crate::infrastructure::Result<()> {

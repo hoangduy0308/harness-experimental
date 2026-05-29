@@ -9,6 +9,8 @@ pub enum ParseHarnessValueError {
     InputType(String),
     #[error("unknown lane '{0}'. Use: tiny, normal, or high-risk")]
     RiskLane(String),
+    #[error("unknown trace outcome '{0}'. Use: completed, blocked, partial, failed, or review")]
+    TraceOutcome(String),
     #[error("{0} must be an integer")]
     Integer(String),
     #[error("{0} must be 0 or 1")]
@@ -86,6 +88,43 @@ impl FromStr for RiskLane {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TraceOutcome {
+    Completed,
+    Blocked,
+    Partial,
+    Failed,
+    Review,
+}
+
+impl TraceOutcome {
+    pub fn as_db_value(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Blocked => "blocked",
+            Self::Partial => "partial",
+            Self::Failed => "failed",
+            Self::Review => "review",
+        }
+    }
+}
+
+impl FromStr for TraceOutcome {
+    type Err = ParseHarnessValueError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let normalized = normalize_token(value);
+        match normalized.as_str() {
+            "completed" => Ok(Self::Completed),
+            "blocked" => Ok(Self::Blocked),
+            "partial" => Ok(Self::Partial),
+            "failed" => Ok(Self::Failed),
+            "review" => Ok(Self::Review),
+            _ => Err(ParseHarnessValueError::TraceOutcome(value.to_owned())),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct IntakeRecord {
     pub id: i64,
@@ -105,6 +144,14 @@ pub struct StoryMatrixRecord {
     pub e2e: String,
     pub platform: String,
     pub evidence: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct StoryListRecord {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub lane: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -266,6 +313,15 @@ mod tests {
     #[test]
     fn parses_high_risk_lane_alias() {
         assert_eq!("high-risk".parse::<RiskLane>().unwrap(), RiskLane::HighRisk);
+    }
+
+    #[test]
+    fn parses_review_trace_outcome() {
+        assert_eq!(
+            "review".parse::<TraceOutcome>().unwrap(),
+            TraceOutcome::Review
+        );
+        assert_eq!(TraceOutcome::Review.as_db_value(), "review");
     }
 
     #[test]

@@ -21,7 +21,7 @@ fi
 
 rust_cli_supports() {
   case "${1:-}:${2:-}" in
-    init:*|migrate:*|import:brownfield|intake:*|story:add|story:update|decision:add|decision:verify|backlog:add|backlog:close|trace:*|query:matrix|query:backlog|query:decisions|query:intakes|query:traces|query:friction|query:stats|query:sql)
+    init:*|migrate:*|import:brownfield|intake:*|story:add|story:update|story:list|decision:add|decision:verify|backlog:add|backlog:close|trace:*|query:matrix|query:backlog|query:decisions|query:intakes|query:traces|query:friction|query:stats|query:sql)
       return 0
       ;;
     *)
@@ -30,9 +30,59 @@ rust_cli_supports() {
   esac
 }
 
+rust_cli_runtime_supports() {
+  local command="${1:-}" subcommand="${2:-}"
+  case "$command:$subcommand" in
+    story:list)
+      "$RUST_CLI" story --help 2>&1 | grep -Eq '(^|[[:space:]])list([[:space:]]|$)'
+      ;;
+    init:*|migrate:*)
+      [ ! -f "$SCHEMA_DIR/002-trace-review-outcome.sql" ] ||
+        rust_cli_supports_review_outcome
+      ;;
+    trace:*)
+      if trace_args_request_review "$@"; then
+        rust_cli_supports_review_outcome
+      else
+        return 0
+      fi
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+rust_cli_supports_review_outcome() {
+  local probe_db="$REPO_ROOT/.harness-probe-review.db"
+  local output
+  rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+  if ! output="$(HARNESS_DB="$probe_db" HARNESS_REPO_ROOT="$REPO_ROOT" "$RUST_CLI" init 2>&1)"; then
+    rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+    return 1
+  fi
+  output="$(HARNESS_DB="$probe_db" HARNESS_REPO_ROOT="$REPO_ROOT" "$RUST_CLI" trace --summary "__harness_probe__" --outcome review 2>&1 || true)"
+  rm -f "$probe_db" "$probe_db-wal" "$probe_db-shm"
+  printf '%s' "$output" | grep -Fq "Trace #"
+}
+
+trace_args_request_review() {
+  local previous=""
+  for argument in "$@"; do
+    local token
+    token="$(printf '%s' "$argument" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[^a-z0-9]+/_/g; s/^_+//; s/_+$//')"
+    if [ "$previous" = "--outcome" ] && [ "$token" = "review" ]; then
+      return 0
+    fi
+    previous="$argument"
+  done
+  return 1
+}
+
 if [ "${HARNESS_DISABLE_RUST_CLI:-0}" != "1" ] &&
    [ -x "$RUST_CLI" ] &&
-   rust_cli_supports "${1:-}" "${2:-}"; then
+   rust_cli_supports "${1:-}" "${2:-}" &&
+   rust_cli_runtime_supports "$@"; then
   HARNESS_REPO_ROOT="$REPO_ROOT" exec "$RUST_CLI" "$@"
 fi
 
@@ -104,6 +154,20 @@ normalize_risk() {
   normalize_lane "$1"
 }
 
+normalize_trace_outcome() {
+  [ -z "$1" ] && return
+  local token
+  token="$(normalize_token "$1")"
+  case "$token" in
+    completed|blocked|partial|failed|review)
+      printf '%s' "$token"
+      ;;
+    *)
+      die "unknown trace outcome '$1'. Use: completed, blocked, partial, failed, or review"
+      ;;
+  esac
+}
+
 require_integer() {
   local label="$1" value="$2"
   [[ "$value" =~ ^[0-9]+$ ]] || die "$label must be an integer"
@@ -149,15 +213,20 @@ cmd_init() {
     if [ "$current" -eq 0 ]; then
       info "No schema version found. Applying schema version 1."
       sql_file "$SCHEMA_DIR/001-init.sql"
-      info "Schema version 1 applied."
+      cmd_migrate
+      info "Schema initialized."
       return 0
     fi
+
     info "Current schema version: $current"
+    cmd_migrate
     return 0
   fi
+
   info "Creating harness database at $DB_PATH"
   sql_file "$SCHEMA_DIR/001-init.sql"
-  info "Schema version 1 applied."
+  cmd_migrate
+  info "Schema initialized."
 }
 
 # ── migrate ────────────────────────────────────────────────────────
@@ -509,8 +578,13 @@ cmd_story() {
       info "Story $id updated."
       ;;
 
+    list)
+      sql_pretty "SELECT id, title, status, risk_lane AS lane
+                  FROM story ORDER BY id;"
+      ;;
+
     *)
-      die "story: expected 'add' or 'update'. Usage: harness story add|update [flags]"
+      die "story: expected 'add', 'update', or 'list'. Usage: harness story add|update|list [flags]"
       ;;
   esac
 }
@@ -667,6 +741,8 @@ cmd_trace() {
   [ -n "$intake_id" ] && require_integer "trace: --intake" "$intake_id"
   [ -n "$duration" ]  && require_integer "trace: --duration" "$duration"
   [ -n "$tokens" ]    && require_integer "trace: --tokens" "$tokens"
+  cmd_migrate >/dev/null
+  outcome="$(normalize_trace_outcome "$outcome")"
 
   local last_id
   last_id=$(sql "INSERT INTO trace (
@@ -821,6 +897,7 @@ EOF
 Usage:
   harness story add --id <id> --title <text> --lane <lane> [flags]
   harness story update --id <id> [flags]
+  harness story list
 
 Add flags:
   --contract <path>  Related product contract
@@ -877,7 +954,7 @@ Flags:
   --intake <id>       Linked intake id
   --story <id>        Linked story id
   --agent <name>      Agent name
-  --outcome <result>  completed, blocked, partial, or failed
+  --outcome <result>  completed, blocked, partial, failed, or review
   --actions <csv>     Actions taken
   --read <csv>        Files read
   --changed <csv>     Files changed
@@ -925,7 +1002,8 @@ Commands:
   migrate               Apply pending schema migrations
   import  brownfield    Seed DB from existing markdown state
   intake  [flags]       Record a feature intake classification
-  story   add|update    Add or update a story (test matrix row)
+  story   add|update|list
+                        Add, update, or list stories
   decision add|verify   Add a decision or run its verification
   backlog add|close     Add or close a backlog item
   trace   [flags]       Record an agent execution trace

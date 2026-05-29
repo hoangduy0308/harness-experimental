@@ -13,7 +13,7 @@ use crate::application::{
 };
 use crate::domain::{
     normalize_token, yes_no, BacklogRecord, DecisionRecord, FrictionRecord, HarnessStats,
-    IntakeRecord, RiskLane, StoryMatrixRecord, TraceRecord,
+    IntakeRecord, RiskLane, StoryListRecord, StoryMatrixRecord, TraceRecord,
 };
 
 pub type Result<T> = std::result::Result<T, HarnessInfraError>;
@@ -47,6 +47,7 @@ pub trait HarnessRepository {
     fn record_intake(&self, input: IntakeInput) -> Result<i64>;
     fn add_story(&self, input: StoryAddInput) -> Result<()>;
     fn update_story(&self, input: StoryUpdateInput) -> Result<()>;
+    fn query_story_list(&self) -> Result<Vec<StoryListRecord>>;
     fn add_decision(&self, input: DecisionAddInput) -> Result<()>;
     fn verify_decision(&self, id: &str) -> Result<DecisionVerifyResult>;
     fn add_backlog(&self, input: BacklogAddInput) -> Result<i64>;
@@ -119,6 +120,24 @@ impl SqliteHarnessRepository {
         let schema = fs::read_to_string(schema_path)?;
         connection.execute_batch(&schema)?;
         Ok(())
+    }
+
+    fn apply_pending_migrations(
+        &self,
+        connection: &Connection,
+        current_version: i64,
+    ) -> Result<Vec<i64>> {
+        let mut applied = Vec::new();
+
+        for (version, path) in self.migration_files()? {
+            if version > current_version {
+                let sql = fs::read_to_string(path)?;
+                connection.execute_batch(&sql)?;
+                applied.push(version);
+            }
+        }
+
+        Ok(applied)
     }
 
     fn migration_files(&self) -> Result<Vec<(i64, PathBuf)>> {
@@ -357,6 +376,15 @@ impl HarnessRepository for SqliteHarnessRepository {
             let current = Self::schema_version(&connection).unwrap_or(0);
             if current == 0 {
                 self.apply_schema_v1(&connection)?;
+                let current = Self::schema_version(&connection).unwrap_or(1);
+                self.apply_pending_migrations(&connection, current)?;
+                return Ok(InitResult::MigratedExisting {
+                    db_path: self.db_path.clone(),
+                });
+            }
+
+            let applied = self.apply_pending_migrations(&connection, current)?;
+            if !applied.is_empty() {
                 return Ok(InitResult::MigratedExisting {
                     db_path: self.db_path.clone(),
                 });
@@ -370,6 +398,8 @@ impl HarnessRepository for SqliteHarnessRepository {
 
         let connection = self.open_or_create()?;
         self.apply_schema_v1(&connection)?;
+        let current = Self::schema_version(&connection).unwrap_or(1);
+        self.apply_pending_migrations(&connection, current)?;
         Ok(InitResult::Created {
             db_path: self.db_path.clone(),
         })
@@ -378,15 +408,7 @@ impl HarnessRepository for SqliteHarnessRepository {
     fn migrate(&self) -> Result<MigrateResult> {
         let connection = self.open_existing()?;
         let current_version = Self::schema_version(&connection).unwrap_or(0);
-        let mut applied = Vec::new();
-
-        for (version, path) in self.migration_files()? {
-            if version > current_version {
-                let sql = fs::read_to_string(path)?;
-                connection.execute_batch(&sql)?;
-                applied.push(version);
-            }
-        }
+        let applied = self.apply_pending_migrations(&connection, current_version)?;
 
         Ok(MigrateResult {
             current_version,
@@ -481,6 +503,25 @@ impl HarnessRepository for SqliteHarnessRepository {
         Ok(())
     }
 
+    fn query_story_list(&self) -> Result<Vec<StoryListRecord>> {
+        let connection = self.open_existing()?;
+        let mut statement = connection.prepare(
+            "SELECT id, title, status, risk_lane
+             FROM story ORDER BY id;",
+        )?;
+
+        let rows = statement.query_map([], |row| {
+            Ok(StoryListRecord {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+                lane: row.get(3)?,
+            })
+        })?;
+
+        collect_rows(rows)
+    }
+
     fn add_decision(&self, input: DecisionAddInput) -> Result<()> {
         let connection = self.open_existing()?;
         connection.execute(
@@ -568,6 +609,8 @@ impl HarnessRepository for SqliteHarnessRepository {
 
     fn record_trace(&self, input: TraceInput) -> Result<i64> {
         let connection = self.open_existing()?;
+        let current_version = Self::schema_version(&connection)?;
+        self.apply_pending_migrations(&connection, current_version)?;
         connection.execute(
             "INSERT INTO trace (
                 task_summary, intake_id, story_id, agent,
@@ -584,7 +627,7 @@ impl HarnessRepository for SqliteHarnessRepository {
                 input.files_changed.as_json_text(),
                 input.decisions.as_json_text(),
                 input.errors.as_json_text(),
-                input.outcome,
+                input.outcome.map(|value| value.as_db_value().to_owned()),
                 input.duration_seconds,
                 input.token_estimate,
                 input.friction,
@@ -1034,7 +1077,7 @@ mod tests {
         BacklogAddInput, BacklogCloseInput, DecisionAddInput, IntakeInput, StoryAddInput,
         StoryUpdateInput, TraceInput,
     };
-    use crate::domain::{BoolFlag, CsvList, InputType, RiskLane};
+    use crate::domain::{BoolFlag, CsvList, InputType, RiskLane, TraceOutcome};
 
     fn test_repository() -> (TempDir, SqliteHarnessRepository) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1059,6 +1102,11 @@ mod tests {
 
         assert!(matches!(result, InitResult::Created { .. }));
         assert_eq!(repository.query_stats().unwrap().intakes, 0);
+        let connection = repository.open_existing().unwrap();
+        assert_eq!(
+            SqliteHarnessRepository::schema_version(&connection).unwrap(),
+            2
+        );
     }
 
     #[test]
@@ -1198,7 +1246,7 @@ mod tests {
                 intake_id: None,
                 story_id: Some("US-T".to_owned()),
                 agent: Some("test".to_owned()),
-                outcome: Some("completed".to_owned()),
+                outcome: Some(TraceOutcome::Completed),
                 duration_seconds: None,
                 token_estimate: None,
                 friction: Some("none".to_owned()),
@@ -1218,6 +1266,139 @@ mod tests {
         assert_eq!(
             repository.query_friction().unwrap()[0].harness_friction,
             "none"
+        );
+    }
+
+    #[test]
+    fn story_list_returns_compact_story_rows_ordered_by_id() {
+        let (_temp_dir, repository) = test_repository();
+        repository.init().unwrap();
+
+        repository
+            .add_story(StoryAddInput {
+                id: "US-002".to_owned(),
+                title: "Second story".to_owned(),
+                risk_lane: RiskLane::Normal,
+                contract_doc: None,
+                notes: None,
+            })
+            .unwrap();
+        repository
+            .add_story(StoryAddInput {
+                id: "US-001".to_owned(),
+                title: "First story".to_owned(),
+                risk_lane: RiskLane::Tiny,
+                contract_doc: None,
+                notes: None,
+            })
+            .unwrap();
+
+        let stories = repository.query_story_list().unwrap();
+
+        assert_eq!(stories[0].id, "US-001");
+        assert_eq!(stories[0].title, "First story");
+        assert_eq!(stories[0].status, "planned");
+        assert_eq!(stories[0].lane, "tiny");
+        assert_eq!(stories[1].id, "US-002");
+    }
+
+    #[test]
+    fn migration_allows_review_trace_outcome() {
+        let (_temp_dir, repository) = test_repository();
+        repository.init().unwrap();
+
+        let trace_id = repository
+            .record_trace(TraceInput {
+                task_summary: "Review trace".to_owned(),
+                intake_id: None,
+                story_id: None,
+                agent: Some("test".to_owned()),
+                outcome: Some(TraceOutcome::Review),
+                duration_seconds: None,
+                token_estimate: None,
+                friction: None,
+                notes: None,
+                actions: CsvList::from_optional(None),
+                files_read: CsvList::from_optional(None),
+                files_changed: CsvList::from_optional(None),
+                decisions: CsvList::from_optional(None),
+                errors: CsvList::from_optional(None),
+            })
+            .unwrap();
+
+        assert_eq!(trace_id, 1);
+        assert_eq!(
+            repository.query_traces().unwrap()[0].outcome.as_deref(),
+            Some("review")
+        );
+    }
+
+    #[test]
+    fn init_migrates_existing_outdated_database() {
+        let (_temp_dir, repository) = test_repository();
+        let connection = repository.open_or_create().unwrap();
+        repository.apply_schema_v1(&connection).unwrap();
+        drop(connection);
+
+        let result = repository.init().unwrap();
+
+        assert!(matches!(result, InitResult::MigratedExisting { .. }));
+        let trace_id = repository
+            .record_trace(TraceInput {
+                task_summary: "Review trace".to_owned(),
+                intake_id: None,
+                story_id: None,
+                agent: Some("test".to_owned()),
+                outcome: Some(TraceOutcome::Review),
+                duration_seconds: None,
+                token_estimate: None,
+                friction: None,
+                notes: None,
+                actions: CsvList::from_optional(None),
+                files_read: CsvList::from_optional(None),
+                files_changed: CsvList::from_optional(None),
+                decisions: CsvList::from_optional(None),
+                errors: CsvList::from_optional(None),
+            })
+            .unwrap();
+
+        assert_eq!(trace_id, 1);
+    }
+
+    #[test]
+    fn trace_write_migrates_existing_outdated_database() {
+        let (_temp_dir, repository) = test_repository();
+        let connection = repository.open_or_create().unwrap();
+        repository.apply_schema_v1(&connection).unwrap();
+        drop(connection);
+
+        repository
+            .record_trace(TraceInput {
+                task_summary: "Review trace".to_owned(),
+                intake_id: None,
+                story_id: None,
+                agent: Some("test".to_owned()),
+                outcome: Some(TraceOutcome::Review),
+                duration_seconds: None,
+                token_estimate: None,
+                friction: None,
+                notes: None,
+                actions: CsvList::from_optional(None),
+                files_read: CsvList::from_optional(None),
+                files_changed: CsvList::from_optional(None),
+                decisions: CsvList::from_optional(None),
+                errors: CsvList::from_optional(None),
+            })
+            .unwrap();
+
+        let connection = repository.open_existing().unwrap();
+        assert_eq!(
+            SqliteHarnessRepository::schema_version(&connection).unwrap(),
+            2
+        );
+        assert_eq!(
+            repository.query_traces().unwrap()[0].outcome.as_deref(),
+            Some("review")
         );
     }
 

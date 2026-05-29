@@ -108,6 +108,7 @@ Common commands:
 scripts/bin/harness-cli intake  --type <type> --summary <text> --lane <lane>
 scripts/bin/harness-cli story   add --id <id> --title <text> --lane <lane>
 scripts/bin/harness-cli story   update --id <id> --status <status>
+scripts/bin/harness-cli story   list
 scripts/bin/harness-cli trace   --summary <text> --outcome <outcome>
 scripts/bin/harness-cli query   matrix
 scripts/bin/harness-cli query   backlog
