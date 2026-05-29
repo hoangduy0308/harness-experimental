@@ -198,6 +198,7 @@ This repo uses Harness. Before work, read:
 - `docs/HARNESS.md`
 - `docs/FEATURE_INTAKE.md`
 - `docs/ARCHITECTURE.md`
+- `docs/CONTEXT_RULES.md`
 - `scripts/harness query matrix`
 
 On native Windows, run Harness through `scripts\harness.cmd` instead of the
@@ -668,12 +669,16 @@ log "Target project: $TARGET_DIR"
 AGENTS.md
 README.md
 docs/ARCHITECTURE.md
+docs/CONTEXT_RULES.md
 docs/FEATURE_INTAKE.md
 docs/GLOSSARY.md
 docs/HARNESS.md
 docs/HARNESS_BACKLOG.md
+docs/HARNESS_COMPONENTS.md
+docs/HARNESS_MATURITY.md
 docs/README.md
 docs/TEST_MATRIX.md
+docs/TRACE_SPEC.md
 docs/decisions/0001-harness-first-development.md
 docs/decisions/0002-post-spec-product-lifecycle.md
 docs/decisions/0003-generic-spec-intake-harness.md

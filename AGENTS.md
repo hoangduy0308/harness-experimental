@@ -11,6 +11,7 @@ This repo uses Harness. Before work, read:
 - `docs/HARNESS.md`
 - `docs/FEATURE_INTAKE.md`
 - `docs/ARCHITECTURE.md`
+- `docs/CONTEXT_RULES.md`
 - `scripts/harness query matrix`
 
 On native Windows, run Harness through `scripts\harness.cmd` instead of the
